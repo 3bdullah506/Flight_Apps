@@ -1,0 +1,90 @@
+{
+  "project_info": {
+    "project_number": "880570571188",
+    "project_id": "flight-booking-app-a1d75",
+    "storage_bucket": "flight-booking-app-a1d75.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:880570571188:android:fac4200fb413349c2ffae1",
+        "android_client_info": {
+          "package_name": "com.example.flight_admin_web"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "880570571188-6365p1j8qql9fo4u3t03uqnuqik645g7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4J-6CrluX9Y3N-fsfr7iOfyM9Y3PS_EE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "880570571188-6365p1j8qql9fo4u3t03uqnuqik645g7.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "880570571188-1fn4n60ndk8m3mt9c7ariutbququnvhh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.flightClientApp"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:880570571188:android:13e75fbdf1c11e9d2ffae1",
+        "android_client_info": {
+          "package_name": "com.example.flight_client_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "880570571188-jufbm3b3eic5i826t6khj9lojfcbbj0t.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.flight_client_app",
+            "certificate_hash": "e2744849cf13ad6385e4ce1edaaeb7fbfcd1f710"
+          }
+        },
+        {
+          "client_id": "880570571188-6365p1j8qql9fo4u3t03uqnuqik645g7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4J-6CrluX9Y3N-fsfr7iOfyM9Y3PS_EE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "880570571188-6365p1j8qql9fo4u3t03uqnuqik645g7.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "880570571188-1fn4n60ndk8m3mt9c7ariutbququnvhh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.flightClientApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
