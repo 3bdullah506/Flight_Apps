@@ -5,7 +5,184 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../models/order_model.dart';
 import '../services/firebase_service.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
+
+class PdfService {
+  static Future<void> generateTicket({required OrderModel order}) async {
+    final pdf = pw.Document();
+
+    // تحميل الخطوط العربية فقط
+    final arabicFont = await PdfGoogleFonts.amiriRegular();
+    final arabicFontBold = await PdfGoogleFonts.amiriBold();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        theme: pw.ThemeData.withFont(
+          base: arabicFont,
+          bold: arabicFontBold,
+        ),
+        build: (pw.Context context) {
+          return [
+            pw.Directionality(
+              textDirection: pw.TextDirection.rtl,
+              child: pw.Column(
+                children: [
+                  // --- الجزء العلوي (Header) ---
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(20),
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColors.blueAccent700,
+                      borderRadius: pw.BorderRadius.only(
+                        topLeft: pw.Radius.circular(15),
+                        topRight: pw.Radius.circular(15),
+                      ),
+                    ),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text('تذكرة صعود الطائرة', 
+                                style: pw.TextStyle(color: PdfColors.white, fontSize: 22, fontWeight: pw.FontWeight.bold)),
+                            pw.Text('BOARDING PASS', 
+                                style: const pw.TextStyle(color: PdfColor.fromInt(0xFFE0E0E0), fontSize: 12)),
+                          ],
+                        ),
+                        pw.Container(
+                          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColors.white,
+                            borderRadius: pw.BorderRadius.circular(5),
+                          ),
+                         ),
+                      ],
+                    ),
+                  ),
+
+                  // --- تفاصيل الرحلة الأساسية (الوجهة) ---
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(vertical: 30, horizontal: 20),
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColor.fromInt(0xFFF8F9FA),
+                      border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey300, width: 1, style: pw.BorderStyle.dashed)),
+                    ),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildCityInfo('مـن / FROM', order.origin, arabicFontBold),
+                        pw.Column(children: [
+                          pw.Text('<', style: pw.TextStyle(fontSize: 20, color: PdfColors.blueAccent700, fontWeight: pw.FontWeight.bold)),
+                          pw.Container(width: 80, height: 1.5, color: PdfColors.blueAccent700),
+                        ]),
+                        _buildCityInfo('إلـى / TO', order.destination, arabicFontBold),
+                      ],
+                    ),
+                  ),
+
+                  // --- شبكة البيانات الكاملة (13 حقل) ---
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.all(20),
+                    child: pw.Wrap(
+                      spacing: 15,
+                      runSpacing: 20,
+                      children: [
+                        _infoItem('اسم العميل', order.userName, width: 180),
+                        _infoItem('رقم الرحلة', order.flightNumber),
+                        _infoItem('تاريخ الرحلة', DateFormat('dd/MM/yyyy').format(order.flightDate)),
+                        _infoItem('وقت الإقلاع', order.departureTime),
+                        _infoItem('وقت الوصول', order.arrivalTime),
+                        _infoItem('وقت الصعود', order.boardingTime),
+                        _infoItem('مدة الرحلة', order.duration),
+                        _infoItem('رقم المقعد', order.seatNumber, isSpecial: true),
+                        _infoItem('السعر', '\$${order.price.toStringAsFixed(0)}'),
+                        _infoItem('تاريخ الحجز', DateFormat('dd/MM/yyyy').format(order.createdAt)),
+                        _infoItem('البريد', order.userEmail, width: 150),
+                        _infoItem('الهاتف', order.userPhone),
+                        _infoItem('رقم الجواز', order.passportNumber),
+                      ],
+                    ),
+                  ),
+
+                  pw.SizedBox(height: 20),
+
+                  // --- الجزء السفلي (Barcode & Footer) ---
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(15),
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColor.fromInt(0xFFEEEEEE),
+                      borderRadius: pw.BorderRadius.only(
+                        bottomLeft: pw.Radius.circular(15),
+                        bottomRight: pw.Radius.circular(15),
+                      ),
+                    ),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text('رقم الحجز (Booking ID)', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+                            pw.Text(order.bookingId, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                          ],
+                        ),
+                        pw.BarcodeWidget(
+                          barcode: pw.Barcode.code128(),
+                          data: order.bookingId,
+                          width: 120,
+                          height: 40,
+                          drawText: false,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ];
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (format) async => pdf.save());
+  }
+
+  static pw.Widget _buildCityInfo(String label, String city, pw.Font boldFont) {
+    return pw.Column(
+      children: [
+        pw.Text(label, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey600)),
+        pw.SizedBox(height: 5),
+        pw.Text(city, style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, font: boldFont)),
+      ],
+    );
+  }
+
+  static pw.Widget _infoItem(String label, String value, {double width = 85, bool isSpecial = false}) {
+    return pw.SizedBox(
+      width: width,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(label, style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            value,
+            style: pw.TextStyle(
+              fontSize: 11,
+              fontWeight: isSpecial ? pw.FontWeight.bold : pw.FontWeight.normal,
+              color: isSpecial ? PdfColors.red800 : PdfColors.black,
+            ),
+          ),
+          pw.Container(height: 1, width: 40, color: PdfColors.grey200), // خط زخرفي تحت الحقل
+        ],
+      ),
+    );
+  }
+}
 class OrderTrackingScreen extends StatelessWidget {
   const OrderTrackingScreen({super.key});
 
@@ -43,7 +220,6 @@ class OrderTrackingScreen extends StatelessWidget {
       },
     );
   }
-
   Widget _buildOrderSummaryCard(BuildContext context, OrderModel order) {
     final status = _statusStyle(order.status);
 
@@ -285,6 +461,23 @@ class OrderTrackingScreen extends StatelessWidget {
                       child: Text(
                         status.note,
                         style: TextStyle(color: status.color, fontSize: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      // onPressed: () => generateOrderPdf(order),
+                      onPressed: () => PdfService.generateTicket(order: order), // استدعاء دالة الـ PDF
+                      icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+                      label: const Text(
+                        'تصدير تفاصيل الطلب PDF',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        minimumSize: const Size(double.infinity, 50),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
                       ),
                     ),
                   ],

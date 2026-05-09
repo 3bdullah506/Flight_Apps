@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/user_model.dart';
+// import '../models/user_model.dart';
 import '../services/firebase_service.dart';
 
 class ProfileScreen extends StatefulWidget {
