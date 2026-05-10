@@ -36,7 +36,7 @@ class FirebaseService {
   /// حجز بمقعد يختاره العميل بصرياً
   Future<void> bookFlightWithSeat(OrderModel order, String seatNumber) async {
     final flightRef = _db.collection('flights').doc(order.flightId);
-    final orderRef  = _db.collection('orders').doc();
+    final orderRef = _db.collection('orders').doc();
 
     await _db.runTransaction((transaction) async {
       final flightSnap = await transaction.get(flightRef);
@@ -53,7 +53,8 @@ class FirebaseService {
       // التحقق أن المقعد لم يُحجز في نفس الوقت من شخص آخر
       final reservedSeats = _readReservedSeats(flightData);
       if (seatNumber.isNotEmpty && reservedSeats.contains(seatNumber)) {
-        throw Exception('المقعد $seatNumber محجوز بالفعل، يرجى اختيار مقعد آخر');
+        throw Exception(
+            'المقعد $seatNumber محجوز بالفعل، يرجى اختيار مقعد آخر');
       }
 
       final orderData = {
@@ -73,15 +74,15 @@ class FirebaseService {
   /// حجز تلقائي (للتوافق مع الكود القديم)
   Future<void> bookFlight(OrderModel order) async {
     final flightRef = _db.collection('flights').doc(order.flightId);
-    final orderRef  = _db.collection('orders').doc();
+    final orderRef = _db.collection('orders').doc();
 
     await _db.runTransaction((transaction) async {
       final flightSnap = await transaction.get(flightRef);
       if (!flightSnap.exists) throw Exception('الرحلة غير موجودة');
 
       final flightData = flightSnap.data()!;
-      final seats      = (flightData['availableSeats'] as num?)?.toInt() ?? 0;
-      final totalSeats = (flightData['totalSeats']     as num?)?.toInt() ?? seats;
+      final seats = (flightData['availableSeats'] as num?)?.toInt() ?? 0;
+      final totalSeats = (flightData['totalSeats'] as num?)?.toInt() ?? seats;
 
       if (seats <= 0) {
         throw Exception('عذراً، اكتملت مقاعد هذه الرحلة ولا يمكن إتمام الحجز');
@@ -89,9 +90,9 @@ class FirebaseService {
 
       final reservedSeats = _readReservedSeats(flightData);
       final seatNumber = _nextSeatNumber(
-        totalSeats:     totalSeats > 0 ? totalSeats : seats,
+        totalSeats: totalSeats > 0 ? totalSeats : seats,
         availableSeats: seats,
-        reservedSeats:  reservedSeats,
+        reservedSeats: reservedSeats,
       );
 
       final orderData = {
@@ -102,7 +103,7 @@ class FirebaseService {
       transaction.set(orderRef, orderData);
       transaction.update(flightRef, {
         'availableSeats': seats - 1,
-        'reservedSeats':  FieldValue.arrayUnion([seatNumber]),
+        'reservedSeats': FieldValue.arrayUnion([seatNumber]),
       });
     });
   }
@@ -128,7 +129,8 @@ class FirebaseService {
   Future<UserModel?> getUser(String userId) async {
     final doc = await _db.collection('users').doc(userId).get();
     if (doc.exists) {
-      return UserModel.fromFirestore(doc.data() as Map<String, dynamic>, doc.id);
+      return UserModel.fromFirestore(
+          doc.data() as Map<String, dynamic>, doc.id);
     }
     return null;
   }
@@ -142,7 +144,10 @@ class FirebaseService {
   Set<String> _readReservedSeats(Map<String, dynamic> data) {
     final raw = data['reservedSeats'];
     if (raw is! Iterable) return {};
-    return raw.map((s) => s.toString().trim()).where((s) => s.isNotEmpty).toSet();
+    return raw
+        .map((s) => s.toString().trim())
+        .where((s) => s.isNotEmpty)
+        .toSet();
   }
 
   String _nextSeatNumber({
@@ -151,7 +156,9 @@ class FirebaseService {
     required Set<String> reservedSeats,
   }) {
     final bookedCount = (totalSeats - availableSeats).clamp(0, totalSeats);
-    for (var i = 0; i < bookedCount; i++) reservedSeats.add(_seatNumberForIndex(i));
+    for (var i = 0; i < bookedCount; i++) {
+      reservedSeats.add(_seatNumberForIndex(i));
+    }
     for (var i = 0; i < totalSeats; i++) {
       final seat = _seatNumberForIndex(i);
       if (!reservedSeats.contains(seat)) return seat;
@@ -160,7 +167,7 @@ class FirebaseService {
   }
 
   String _seatNumberForIndex(int index) {
-    final row    = (index ~/ _seatsPerRow) + 1;
+    final row = (index ~/ _seatsPerRow) + 1;
     final column = String.fromCharCode(65 + (index % _seatsPerRow));
     return '$column$row';
   }

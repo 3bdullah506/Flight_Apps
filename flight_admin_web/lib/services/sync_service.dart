@@ -1,66 +1,78 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+
+import '../models/flight_model.dart';
 import 'firebase_service.dart';
 import 'local_db_service.dart';
-import '../models/flight_model.dart';
 
-/// خدمة المزامنة — تراقب الإنترنت وترفع العمليات المعلقة تلقائياً
 class SyncService {
   static final SyncService _instance = SyncService._internal();
   factory SyncService() => _instance;
   SyncService._internal();
 
   final AdminFirebaseService _firebase = AdminFirebaseService();
-  StreamSubscription? _connectivitySub;
-  bool _isSyncing = false;
-
-  // ── Stream لإعلام الـ UI بحالة الاتصال ──
   final StreamController<bool> _onlineController =
       StreamController<bool>.broadcast();
-  Stream<bool> get onlineStream => _onlineController.stream;
+
+  StreamSubscription? _connectivitySub;
+  Timer? _autoSyncTimer;
+  bool _isSyncing = false;
   bool _isOnline = false;
+
+  Stream<bool> get onlineStream => _onlineController.stream;
   bool get isOnline => _isOnline;
 
-  /// ابدأ مراقبة الإنترنت
   void startMonitoring() {
-    if (_connectivitySub != null) return;
+    if (_connectivitySub != null) {
+      _checkNow();
+      return;
+    }
 
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen((results) async {
       final online = results.any((r) => r != ConnectivityResult.none);
-      _isOnline = online;
-      if (online) {
-        await syncPendingOperations();
-      }
-      _emitOnlineState(online);
+      await _handleConnectivityState(online);
     }, onError: (_) {
       _isOnline = false;
       _emitOnlineState(false);
     });
 
-    // تحقق فوري عند التشغيل
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _checkNow(),
+    );
+
     _checkNow();
   }
 
   void stopMonitoring() {
     _connectivitySub?.cancel();
     _connectivitySub = null;
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = null;
   }
 
   Future<void> _checkNow() async {
     try {
       final results = await Connectivity().checkConnectivity();
-      _isOnline = results.any((r) => r != ConnectivityResult.none);
-      if (_isOnline) await syncPendingOperations();
-      _emitOnlineState(_isOnline);
+      final online = results.any((r) => r != ConnectivityResult.none);
+      await _handleConnectivityState(online);
     } catch (_) {
       _isOnline = false;
       _emitOnlineState(false);
     }
   }
 
-  /// رفع كل العمليات المعلقة إلى Firebase
+  Future<void> _handleConnectivityState(bool online) async {
+    _isOnline = online;
+    if (online) {
+      await syncPendingOperations();
+    }
+    _emitOnlineState(online);
+  }
+
   Future<int> syncPendingOperations() async {
     if (_isSyncing) return 0;
     _isSyncing = true;
@@ -98,16 +110,17 @@ class SyncService {
           await LocalDbService.deletePendingOp(opId);
           synced++;
         } catch (_) {
-          // إذا فشلت عملية واحدة نكمل الباقي
           continue;
         }
       }
 
-      // بعد المزامنة نحدّث التخزين المحلي من Firebase
-      if (synced > 0) await _refreshLocalFromFirebase();
+      if (synced > 0) {
+        await _refreshLocalFromFirebase();
+      }
     } finally {
       _isSyncing = false;
     }
+
     return synced;
   }
 

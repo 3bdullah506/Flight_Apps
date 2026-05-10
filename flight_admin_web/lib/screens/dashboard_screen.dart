@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/sync_service.dart';
 import 'flights_screen.dart';
 import 'orders_screen.dart';
 import 'invoice_screen.dart';
@@ -23,15 +24,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   final List<String> _titles = ['إدارة الرحلات', 'إدارة الطلبات', 'الفواتير'];
 
-  final List<IconData> _icons = [
-    Icons.flight,
-    Icons.receipt_long,
-    Icons.picture_as_pdf,
-  ];
-
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('admin_logged_in', false);
+    SyncService().stopMonitoring();
     widget.onLogout();
   }
 
@@ -75,7 +71,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                       Text(
                         'نظام حجز الطيران',
-                        style: TextStyle(color: Colors.indigo[200], fontSize: 12),
+                        style:
+                            TextStyle(color: Colors.indigo[200], fontSize: 12),
                       ),
                     ],
                   ),
@@ -114,7 +111,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     color: Colors.white,
                     boxShadow: [
                       BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           blurRadius: 4)
                     ],
                   ),
@@ -129,7 +126,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                       ),
                       const Spacer(),
-                      const Icon(Icons.admin_panel_settings, color: Colors.indigo),
+                      const Icon(Icons.admin_panel_settings,
+                          color: Colors.indigo),
                       const SizedBox(width: 8),
                       const Text('مسؤول النظام'),
                     ],
@@ -154,7 +152,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         foregroundColor: Colors.white,
         title: Text(
           _titles[_selectedIndex],
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style:
+              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(

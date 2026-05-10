@@ -21,12 +21,13 @@ class _CartScreenState extends State<CartScreen> {
   final FirebaseService _firebaseService = FirebaseService();
   bool _isLoading = false;
 
-  double get _total =>
-      widget.cart.fold(0, (sum, item) => sum + item.flight.price * item.quantity);
+  double get _total => widget.cart
+      .fold(0, (total, item) => total + item.flight.price * item.quantity);
 
   String _generateBookingId() {
     final now = DateTime.now();
-    final rand = (now.millisecondsSinceEpoch % 10000).toString().padLeft(4, '0');
+    final rand =
+        (now.millisecondsSinceEpoch % 10000).toString().padLeft(4, '0');
     return 'BK-${DateFormat('yyyyMMdd').format(now)}-$rand';
   }
 
@@ -164,7 +165,8 @@ class _CartScreenState extends State<CartScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.shopping_cart_outlined, size: 80, color: Colors.grey),
+                  Icon(Icons.shopping_cart_outlined,
+                      size: 80, color: Colors.grey),
                   SizedBox(height: 16),
                   Text('سلتك فارغة',
                       style: TextStyle(fontSize: 18, color: Colors.grey)),

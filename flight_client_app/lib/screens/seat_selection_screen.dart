@@ -31,7 +31,8 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('اختر ${widget.quantity == 1 ? 'مقعدك' : '${widget.quantity} مقاعد'}'),
+        title: Text(
+            'اختر ${widget.quantity == 1 ? 'مقعدك' : '${widget.quantity} مقاعد'}'),
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
       ),
@@ -46,7 +47,8 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
               '${widget.flight.origin} → ${widget.flight.destination}'
               '  •  ${widget.flight.departureTime.isNotEmpty ? widget.flight.departureTime : ""}',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo),
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: Colors.indigo),
             ),
           ),
 
@@ -131,8 +133,7 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
                                             .showSnackBar(SnackBar(
                                           content: Text(
                                               'يمكنك اختيار ${widget.quantity} مقعد فقط'),
-                                          duration:
-                                              const Duration(seconds: 2),
+                                          duration: const Duration(seconds: 2),
                                         ));
                                       }
                                     });
@@ -187,7 +188,7 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
+                    color: Colors.black.withValues(alpha: 0.08),
                     blurRadius: 8,
                     offset: const Offset(0, -2))
               ],
@@ -216,7 +217,8 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
                   height: 50,
                   child: ElevatedButton(
                     onPressed: _selected.length == widget.quantity
-                        ? () => Navigator.pop(context, _selected.toList()..sort())
+                        ? () =>
+                            Navigator.pop(context, _selected.toList()..sort())
                         : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.indigo,

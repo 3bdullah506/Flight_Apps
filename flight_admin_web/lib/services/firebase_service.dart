@@ -1,21 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../models/flight_model.dart';
 
 class AdminFirebaseService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   static const int _seatsPerRow = 6;
-
-  static Future<void> ensureAuthenticated() async {
-    final auth = FirebaseAuth.instance;
-    if (auth.currentUser == null) {
-      try {
-        await auth.signInAnonymously();
-      } catch (e) {
-        // ignore
-      }
-    }
-  }
 
   // ============ الرحلات ============
 

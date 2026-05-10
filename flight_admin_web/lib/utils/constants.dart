@@ -9,6 +9,6 @@ class AdminColors {
 
 // بيانات تسجيل دخول الأدمن
 class AdminCredentials {
-  static const email = 'admin@flight.com';
-  static const password = 'admin123';
+  static const email = 'wijhat@flight.com';
+  static const password = 'wijhat12345';
 }

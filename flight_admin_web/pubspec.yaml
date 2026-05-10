@@ -29,14 +29,18 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
   assets:
     - assets/icon/
 
 flutter_launcher_icons:
-  android: false
-  ios: false
-  image_path: "assets/icon/Flight_Booking_App.jpeg"
+  android: true
+  ios: true
+
+  image_path: "assets/icon/flight_booking_app.png"
+
   web:
     generate: true
+    image_path: "assets/icon/flight_booking_app.png"
     background_color: "#1E3A5F"
     theme_color: "#1E3A5F"

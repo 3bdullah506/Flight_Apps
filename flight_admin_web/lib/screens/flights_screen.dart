@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../models/flight_model.dart';
 import '../services/firebase_service.dart';
@@ -28,7 +29,8 @@ class _FlightsScreenState extends State<FlightsScreen> {
     super.initState();
     _isOnline = _sync.isOnline;
     _onlineSub = _sync.onlineStream.listen((online) {
-      if (mounted) setState(() => _isOnline = online);
+      if (!mounted) return;
+      setState(() => _isOnline = online);
       _refreshFlights();
     });
     _sync.startMonitoring();
@@ -45,10 +47,12 @@ class _FlightsScreenState extends State<FlightsScreen> {
   }
 
   Future<void> _loadFlights() async {
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       final flights = await LocalDbService.getAllFlights();
       final pending = await LocalDbService.getPendingOperations();
+      if (!mounted) return;
       if (mounted) {
         setState(() {
           _flights = flights;
@@ -57,6 +61,7 @@ class _FlightsScreenState extends State<FlightsScreen> {
         });
       }
     } catch (_) {
+      if (!mounted) return;
       if (mounted) {
         setState(() => _loading = false);
         _showSnack('تعذر قراءة البيانات المحلية', Colors.red);
@@ -65,14 +70,17 @@ class _FlightsScreenState extends State<FlightsScreen> {
   }
 
   Future<void> _refreshFlights({bool silent = true}) async {
+    if (!mounted) return;
     try {
       if (_isOnline) {
         // إذا متصل: نجلب من Firebase ونحدّث التخزين المحلي
         final firebase = AdminFirebaseService();
         final live = await firebase.getFlightsOnce();
         await LocalDbService.syncFromFirebase(live);
+        if (!mounted) return;
       }
     } catch (_) {
+      if (!mounted) return;
       if (mounted) {
         setState(() => _isOnline = false);
         if (!silent) {
@@ -81,6 +89,7 @@ class _FlightsScreenState extends State<FlightsScreen> {
         }
       }
     }
+    if (!mounted) return;
     await _loadFlights();
   }
 
@@ -337,6 +346,14 @@ class _FlightsScreenState extends State<FlightsScreen> {
     DateTime selectedDate =
         existing?.date ?? DateTime.now().add(const Duration(days: 7));
 
+    void updateDuration() {
+      final departure = _parseTimeOfDay(depTimeCtrl.text);
+      final arrival = _parseTimeOfDay(arrTimeCtrl.text);
+      durationCtrl.text = departure == null || arrival == null
+          ? ''
+          : _flightDurationLabel(departure, arrival);
+    }
+
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -374,6 +391,12 @@ class _FlightsScreenState extends State<FlightsScreen> {
                   Expanded(
                       child: TextField(
                           controller: depTimeCtrl,
+                          readOnly: true,
+                          onTap: () async {
+                            await _pickTime(ctx, depTimeCtrl);
+                            updateDuration();
+                            setDialogState(() {});
+                          },
                           decoration: const InputDecoration(
                               labelText: 'وقت الإقلاع',
                               border: OutlineInputBorder(),
@@ -382,6 +405,12 @@ class _FlightsScreenState extends State<FlightsScreen> {
                   Expanded(
                       child: TextField(
                           controller: arrTimeCtrl,
+                          readOnly: true,
+                          onTap: () async {
+                            await _pickTime(ctx, arrTimeCtrl);
+                            updateDuration();
+                            setDialogState(() {});
+                          },
                           decoration: const InputDecoration(
                               labelText: 'وقت الوصول',
                               border: OutlineInputBorder(),
@@ -392,6 +421,11 @@ class _FlightsScreenState extends State<FlightsScreen> {
                   Expanded(
                       child: TextField(
                           controller: boardTimeCtrl,
+                          readOnly: true,
+                          onTap: () async {
+                            await _pickTime(ctx, boardTimeCtrl);
+                            setDialogState(() {});
+                          },
                           decoration: const InputDecoration(
                               labelText: 'وقت الصعود',
                               border: OutlineInputBorder(),
@@ -400,6 +434,7 @@ class _FlightsScreenState extends State<FlightsScreen> {
                   Expanded(
                       child: TextField(
                           controller: durationCtrl,
+                          readOnly: true,
                           decoration: const InputDecoration(
                               labelText: 'مدة الرحلة',
                               border: OutlineInputBorder(),
@@ -411,6 +446,11 @@ class _FlightsScreenState extends State<FlightsScreen> {
                       child: TextField(
                           controller: priceCtrl,
                           keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'^\d*\.?\d{0,2}$'),
+                            ),
+                          ],
                           decoration: const InputDecoration(
                               labelText: 'السعر (\$)',
                               border: OutlineInputBorder()))),
@@ -419,6 +459,9 @@ class _FlightsScreenState extends State<FlightsScreen> {
                       child: TextField(
                           controller: seatsCtrl,
                           keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
                           decoration: const InputDecoration(
                               labelText: 'عدد المقاعد',
                               border: OutlineInputBorder()))),
@@ -462,11 +505,28 @@ class _FlightsScreenState extends State<FlightsScreen> {
                   backgroundColor: Colors.indigo,
                   foregroundColor: Colors.white),
               onPressed: () async {
-                if (originCtrl.text.isEmpty || destCtrl.text.isEmpty) return;
+                final validationError = _validateFlightInput(
+                  flightNumber: flightNumCtrl.text,
+                  origin: originCtrl.text,
+                  destination: destCtrl.text,
+                  date: selectedDate,
+                  departureTime: depTimeCtrl.text,
+                  arrivalTime: arrTimeCtrl.text,
+                  boardingTime: boardTimeCtrl.text,
+                  priceText: priceCtrl.text,
+                  seatsText: seatsCtrl.text,
+                  existing: existing,
+                );
+                if (validationError != null) {
+                  _showSnack(validationError, Colors.red);
+                  return;
+                }
                 final seats = int.tryParse(seatsCtrl.text) ?? 0;
+                final price = double.tryParse(priceCtrl.text) ?? 0;
                 final bookedSeats = existing == null
                     ? 0
                     : (existing.totalSeats - existing.availableSeats);
+                updateDuration();
                 final id = existing?.id ??
                     DateTime.now().millisecondsSinceEpoch.toString();
                 final flight = FlightModel(
@@ -479,7 +539,7 @@ class _FlightsScreenState extends State<FlightsScreen> {
                   arrivalTime: arrTimeCtrl.text.trim(),
                   boardingTime: boardTimeCtrl.text.trim(),
                   duration: durationCtrl.text.trim(),
-                  price: double.tryParse(priceCtrl.text) ?? 0,
+                  price: price,
                   totalSeats: seats,
                   availableSeats: (seats - bookedSeats).clamp(0, seats),
                 );
@@ -557,6 +617,120 @@ class _FlightsScreenState extends State<FlightsScreen> {
         _showSnack('خطأ: $e', Colors.red);
       }
     }
+  }
+
+  Future<void> _pickTime(
+    BuildContext context,
+    TextEditingController controller,
+  ) async {
+    final initial = _parseTimeOfDay(controller.text) ?? TimeOfDay.now();
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+    );
+    if (picked == null) return;
+    controller.text = _formatTimeOfDay(picked);
+  }
+
+  TimeOfDay? _parseTimeOfDay(String value) {
+    final minutes = FlightModel.parseClockMinutes(value);
+    if (minutes == null) return null;
+    return TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
+  }
+
+  String _formatTimeOfDay(TimeOfDay value) {
+    final h = value.hour.toString().padLeft(2, '0');
+    final m = value.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  String _flightDurationLabel(TimeOfDay departure, TimeOfDay arrival) {
+    final departureMinutes = departure.hour * 60 + departure.minute;
+    final arrivalMinutes = arrival.hour * 60 + arrival.minute;
+    final durationMinutes =
+        (arrivalMinutes - departureMinutes) % const Duration(days: 1).inMinutes;
+    return FlightModel.formatDurationMinutes(durationMinutes);
+  }
+
+  String? _validateFlightInput({
+    required String flightNumber,
+    required String origin,
+    required String destination,
+    required DateTime date,
+    required String departureTime,
+    required String arrivalTime,
+    required String boardingTime,
+    required String priceText,
+    required String seatsText,
+    required FlightModel? existing,
+  }) {
+    final cleanFlightNumber = flightNumber.trim();
+    final cleanOrigin = origin.trim();
+    final cleanDestination = destination.trim();
+    final today = DateUtils.dateOnly(DateTime.now());
+    final flightDate = DateUtils.dateOnly(date);
+
+    if (cleanFlightNumber.isEmpty) return 'رقم الرحلة مطلوب';
+    if (!RegExp(r'^[A-Za-z]{2,3}\d{1,4}$').hasMatch(cleanFlightNumber)) {
+      return 'رقم الرحلة يجب أن يكون مثل SV123';
+    }
+    if (cleanOrigin.length < 2) return 'مكان الانطلاق غير صحيح';
+    if (cleanDestination.length < 2) return 'الوجهة غير صحيحة';
+    if (cleanOrigin.toLowerCase() == cleanDestination.toLowerCase()) {
+      return 'مكان الانطلاق والوجهة لا يمكن أن يكونا نفس المكان';
+    }
+    if (flightDate.isBefore(today)) {
+      return 'تاريخ الرحلة لا يمكن أن يكون في الماضي';
+    }
+
+    final departure = FlightModel.parseClockMinutes(departureTime);
+    final arrival = FlightModel.parseClockMinutes(arrivalTime);
+    final boarding = FlightModel.parseClockMinutes(boardingTime);
+    if (departure == null) return 'وقت الإقلاع مطلوب وبصيغة صحيحة HH:mm';
+    if (arrival == null) return 'وقت الوصول مطلوب وبصيغة صحيحة HH:mm';
+    if (boarding == null) return 'وقت الصعود مطلوب وبصيغة صحيحة HH:mm';
+
+    final duration = (arrival - departure) % const Duration(days: 1).inMinutes;
+    if (duration == 0) return 'وقت الوصول يجب أن يختلف عن وقت الإقلاع';
+    if (duration > const Duration(hours: 18).inMinutes) {
+      return 'مدة الرحلة غير منطقية، راجع وقت الإقلاع والوصول';
+    }
+
+    final minutesBeforeDeparture =
+        (departure - boarding) % const Duration(days: 1).inMinutes;
+    if (minutesBeforeDeparture == 0) {
+      return 'وقت الصعود يجب أن يكون قبل وقت الإقلاع';
+    }
+    if (minutesBeforeDeparture > const Duration(hours: 6).inMinutes) {
+      return 'وقت الصعود بعيد جدًا عن وقت الإقلاع';
+    }
+
+    final price = double.tryParse(priceText.trim());
+    if (price == null || price <= 0) {
+      return 'السعر يجب أن يكون رقمًا أكبر من صفر';
+    }
+    if (price > 100000) return 'السعر غير منطقي';
+
+    final seats = int.tryParse(seatsText.trim());
+    if (seats == null || seats <= 0) {
+      return 'عدد المقاعد يجب أن يكون رقمًا صحيحًا أكبر من صفر';
+    }
+    if (seats > 900) return 'عدد المقاعد غير منطقي';
+
+    if (existing != null) {
+      final bookedSeats = existing.totalSeats - existing.availableSeats;
+      if (seats < bookedSeats) {
+        return 'عدد المقاعد لا يمكن أن يكون أقل من المقاعد المحجوزة ($bookedSeats)';
+      }
+    }
+
+    return null;
   }
 
   void _showSnack(String message, Color color) {

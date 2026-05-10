@@ -153,6 +153,10 @@ class LocalDbService {
         'origin': f.origin,
         'destination': f.destination,
         'date': f.date.toIso8601String(),
+        'departureMinutes': f.departureMinutes,
+        'arrivalMinutes': f.arrivalMinutes,
+        'boardingMinutes': f.boardingMinutes,
+        'durationMinutes': f.durationMinutes,
         'departureTime': f.departureTime,
         'arrivalTime': f.arrivalTime,
         'boardingTime': f.boardingTime,
@@ -162,20 +166,36 @@ class LocalDbService {
         'availableSeats': f.availableSeats,
       };
 
-  static FlightModel _rowToFlight(Map<String, dynamic> row) => FlightModel(
-        id: _readText(row['id']),
-        flightNumber: _readText(row['flightNumber']),
-        origin: _readText(row['origin']),
-        destination: _readText(row['destination']),
-        date: DateTime.tryParse(_readText(row['date'])) ?? DateTime.now(),
-        departureTime: _readText(row['departureTime']),
-        arrivalTime: _readText(row['arrivalTime']),
-        boardingTime: _readText(row['boardingTime']),
-        duration: _readText(row['duration']),
-        price: _readDouble(row['price']),
-        totalSeats: _readInt(row['totalSeats']),
-        availableSeats: _readInt(row['availableSeats']),
-      );
+  static FlightModel _rowToFlight(Map<String, dynamic> row) {
+    final totalSeats = _readInt(row['totalSeats']);
+    final availableSeats = _readInt(row['availableSeats']).clamp(0, totalSeats);
+    final departureMinutes = _readIntOrNull(row['departureMinutes']) ??
+        FlightModel.parseClockMinutes(_readText(row['departureTime'])) ??
+        -1;
+    final arrivalMinutes = _readIntOrNull(row['arrivalMinutes']) ??
+        FlightModel.parseClockMinutes(_readText(row['arrivalTime'])) ??
+        -1;
+    final boardingMinutes = _readIntOrNull(row['boardingMinutes']) ??
+        FlightModel.parseClockMinutes(_readText(row['boardingTime'])) ??
+        -1;
+    final durationMinutes = _readIntOrNull(row['durationMinutes']) ??
+        _durationBetween(departureMinutes, arrivalMinutes);
+
+    return FlightModel.typed(
+      id: _readText(row['id']),
+      flightNumber: _readText(row['flightNumber']),
+      origin: _readText(row['origin']),
+      destination: _readText(row['destination']),
+      date: DateTime.tryParse(_readText(row['date'])) ?? DateTime.now(),
+      departureMinutes: departureMinutes,
+      arrivalMinutes: arrivalMinutes,
+      boardingMinutes: boardingMinutes,
+      durationMinutes: durationMinutes,
+      price: _readDouble(row['price']),
+      totalSeats: totalSeats,
+      availableSeats: availableSeats,
+    );
+  }
 
   static String _readText(dynamic value) => value?.toString() ?? '';
 
@@ -184,8 +204,19 @@ class LocalDbService {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  static int? _readIntOrNull(dynamic value) {
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
+  }
+
   static double _readDouble(dynamic value) {
     if (value is num) return value.toDouble();
     return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static int _durationBetween(int departure, int arrival) {
+    if (departure < 0 || arrival < 0) return 0;
+    final diff = (arrival - departure) % (24 * 60);
+    return diff == 0 ? 0 : diff;
   }
 }

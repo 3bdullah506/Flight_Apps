@@ -4,7 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
-import 'services/firebase_service.dart';
 import 'services/sync_service.dart';
 
 void main() async {
@@ -12,10 +11,6 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-
-  // ✅ تسجيل دخول مجهول لضمان الوصول لـ Firestore
-  await AdminFirebaseService.ensureAuthenticated();
-  SyncService().startMonitoring();
 
   runApp(const AdminApp());
 }
@@ -40,6 +35,9 @@ class _AdminAppState extends State<AdminApp> {
   Future<void> _checkLogin() async {
     final prefs = await SharedPreferences.getInstance();
     final loggedIn = prefs.getBool('admin_logged_in') ?? false;
+    if (loggedIn) {
+      SyncService().startMonitoring();
+    }
     setState(() {
       _isLoggedIn = loggedIn;
       _isLoading = false;
@@ -55,7 +53,7 @@ class _AdminAppState extends State<AdminApp> {
     }
 
     return MaterialApp(
-      title: 'لوحة تحكم الطيران',
+      title: 'Wijhat Admin',
       debugShowCheckedModeBanner: false,
       builder: (context, child) => Directionality(
         textDirection: TextDirection.rtl,
@@ -67,8 +65,10 @@ class _AdminAppState extends State<AdminApp> {
       ),
       home: _isLoggedIn
           ? DashboardScreen(onLogout: () => setState(() => _isLoggedIn = false))
-          : LoginScreen(
-              onLoginSuccess: () => setState(() => _isLoggedIn = true)),
+          : LoginScreen(onLoginSuccess: () {
+              SyncService().startMonitoring();
+              setState(() => _isLoggedIn = true);
+            }),
     );
   }
 }
