@@ -1,207 +1,341 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/flight_model.dart';
 import '../services/firebase_service.dart';
+import '../services/local_db_service.dart';
+import '../services/sync_service.dart';
 import '../services/excel_service.dart';
 
-class FlightsScreen extends StatelessWidget {
+/// ── النسخة 1: تخزين محلي + مزامنة ──
+class FlightsScreen extends StatefulWidget {
   const FlightsScreen({super.key});
+  @override
+  State<FlightsScreen> createState() => _FlightsScreenState();
+}
+
+class _FlightsScreenState extends State<FlightsScreen> {
+  final SyncService _sync = SyncService();
+  List<FlightModel> _flights = [];
+  StreamSubscription<bool>? _onlineSub;
+  bool _isOnline = false;
+  bool _loading = true;
+  int _pendingCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _isOnline = _sync.isOnline;
+    _onlineSub = _sync.onlineStream.listen((online) {
+      if (mounted) setState(() => _isOnline = online);
+      _refreshFlights();
+    });
+    _sync.startMonitoring();
+    _loadFlights();
+    if (_isOnline) {
+      _refreshFlights();
+    }
+  }
+
+  @override
+  void dispose() {
+    _onlineSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadFlights() async {
+    setState(() => _loading = true);
+    try {
+      final flights = await LocalDbService.getAllFlights();
+      final pending = await LocalDbService.getPendingOperations();
+      if (mounted) {
+        setState(() {
+          _flights = flights;
+          _pendingCount = pending.length;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loading = false);
+        _showSnack('تعذر قراءة البيانات المحلية', Colors.red);
+      }
+    }
+  }
+
+  Future<void> _refreshFlights({bool silent = true}) async {
+    try {
+      if (_isOnline) {
+        // إذا متصل: نجلب من Firebase ونحدّث التخزين المحلي
+        final firebase = AdminFirebaseService();
+        final live = await firebase.getFlightsOnce();
+        await LocalDbService.syncFromFirebase(live);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isOnline = false);
+        if (!silent) {
+          _showSnack(
+              'تعذر الاتصال بالخادم، تم عرض البيانات المحلية', Colors.orange);
+        }
+      }
+    }
+    await _loadFlights();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final service = AdminFirebaseService();
-    final isWide = MediaQuery.of(context).size.width >= 700;
-
     return Scaffold(
-      appBar: isWide
-          ? AppBar(
+      appBar: AppBar(
         title: const Text('إدارة الرحلات'),
         backgroundColor: Colors.white,
         foregroundColor: Colors.indigo,
         elevation: 0,
         actions: [
-          ElevatedButton.icon(
-            onPressed: () => _importFromExcel(context, service),
-            icon: const Icon(Icons.upload_file, size: 18),
-            label: const Text('استيراد Excel'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.teal,
-              foregroundColor: Colors.white,
-            ),
+          // ── مؤشر الاتصال ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(children: [
+              Icon(
+                _isOnline ? Icons.cloud_done : Icons.cloud_off,
+                color: _isOnline ? Colors.green : Colors.red,
+                size: 20,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _isOnline ? 'متصل' : 'غير متصل',
+                style: TextStyle(
+                  color: _isOnline ? Colors.green : Colors.red,
+                  fontSize: 12,
+                ),
+              ),
+              if (_pendingCount > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.orange,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$_pendingCount معلّقة',
+                    style: const TextStyle(color: Colors.white, fontSize: 11),
+                  ),
+                ),
+              ],
+            ]),
           ),
-          const SizedBox(width: 8),
-          ElevatedButton.icon(
-            onPressed: () => _showFlightDialog(context, service),
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('إضافة رحلة'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.indigo,
-              foregroundColor: Colors.white,
+          // ── زر مزامنة يدوية ──
+          if (_isOnline && _pendingCount > 0)
+            IconButton(
+              icon: const Icon(Icons.sync, color: Colors.indigo),
+              tooltip: 'مزامنة الآن',
+              onPressed: () async {
+                try {
+                  final count = await _sync.syncPendingOperations();
+                  if (mounted) {
+                    _showSnack('تمت مزامنة $count عملية ✓', Colors.green);
+                    _loadFlights();
+                  }
+                } catch (_) {
+                  if (mounted) {
+                    _showSnack('تعذرت المزامنة، سيتم إعادة المحاولة لاحقاً',
+                        Colors.red);
+                  }
+                }
+              },
             ),
-          ),
-          const SizedBox(width: 16),
-        ],
-      )
-          : AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.indigo,
-        elevation: 0,
-        title: const Text('الرحلات'),
-        actions: [
           IconButton(
             icon: const Icon(Icons.upload_file, color: Colors.teal),
             tooltip: 'استيراد Excel',
-            onPressed: () => _importFromExcel(context, service),
+            onPressed: () => _importFromExcel(context),
           ),
           IconButton(
             icon: const Icon(Icons.add, color: Colors.indigo),
             tooltip: 'إضافة رحلة',
-            onPressed: () => _showFlightDialog(context, service),
+            onPressed: () => _showFlightDialog(context),
           ),
+          const SizedBox(width: 8),
         ],
       ),
-      body: StreamBuilder<List<FlightModel>>(
-        stream: service.getAllFlights(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final flights = snapshot.data ?? [];
-
-          if (flights.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.flight_land, size: 80, color: Colors.grey[300]),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'لا توجد رحلات.\nأضف رحلة أو استورد من Excel.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: () => _showFlightDialog(context, service),
-                    icon: const Icon(Icons.add),
-                    label: const Text('إضافة رحلة'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.indigo,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Card(
-              elevation: 2,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  headingRowColor:
-                  WidgetStateProperty.all(Colors.indigo[50]),
-                  columns: const [
-                    DataColumn(label: Text('رقم الرحلة', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('الانطلاق',   style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('الوجهة',     style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('التاريخ',    style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('الإقلاع',   style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('الوصول',     style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('الصعود',     style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('المدة',      style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('السعر',      style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('المقاعد',   style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('الإجراءات', style: TextStyle(fontWeight: FontWeight.bold))),
-                  ],
-                  rows: flights.map((flight) {
-                    return DataRow(cells: [
-                      DataCell(Text(flight.flightNumber.isEmpty ? '-' : flight.flightNumber,
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo))),
-                      DataCell(Text(flight.origin)),
-                      DataCell(Text(flight.destination)),
-                      DataCell(Text(DateFormat('dd/MM/yyyy').format(flight.date))),
-                      DataCell(Text(flight.departureTime.isEmpty ? '-' : flight.departureTime)),
-                      DataCell(Text(flight.arrivalTime.isEmpty   ? '-' : flight.arrivalTime)),
-                      DataCell(Text(flight.boardingTime.isEmpty  ? '-' : flight.boardingTime)),
-                      DataCell(Text(flight.duration.isEmpty      ? '-' : flight.duration)),
-                      DataCell(Text('\$${flight.price.toStringAsFixed(0)}')),
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: flight.availableSeats == 0
-                                ? Colors.red.shade50
-                                : flight.availableSeats <= 5
-                                ? Colors.orange.shade50
-                                : Colors.green.shade50,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: flight.availableSeats == 0
-                                  ? Colors.red
-                                  : flight.availableSeats <= 5
-                                  ? Colors.orange
-                                  : Colors.green,
-                            ),
-                          ),
-                          child: Text(
-                            flight.availableSeats == 0
-                                ? 'مكتملة'
-                                : '${flight.availableSeats}/${flight.totalSeats}',
-                            style: TextStyle(
-                              color: flight.availableSeats == 0
-                                  ? Colors.red
-                                  : flight.availableSeats <= 5
-                                  ? Colors.orange
-                                  : Colors.green,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _flights.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.flight_land,
+                          size: 80, color: Colors.grey[300]),
+                      const SizedBox(height: 16),
+                      const Text('لا توجد رحلات',
+                          style: TextStyle(color: Colors.grey)),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: () => _showFlightDialog(context),
+                        icon: const Icon(Icons.add),
+                        label: const Text('إضافة رحلة'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo,
+                          foregroundColor: Colors.white,
                         ),
                       ),
-                      DataCell(Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.blue, size: 20),
-                            tooltip: 'تعديل',
-                            onPressed: () => _showFlightDialog(context, service, flight),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                            tooltip: 'حذف',
-                            onPressed: () => _confirmDelete(context, service, flight.id),
-                          ),
-                        ],
-                      )),
-                    ]);
-                  }).toList(),
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: () => _refreshFlights(silent: false),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: Card(
+                      elevation: 2,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: DataTable(
+                          headingRowColor:
+                              WidgetStateProperty.all(Colors.indigo[50]),
+                          columns: const [
+                            DataColumn(
+                                label: Text('رقم الرحلة',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('الانطلاق',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('الوجهة',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('التاريخ',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('الإقلاع',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('الوصول',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('السعر',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('المقاعد',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('المصدر',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                            DataColumn(
+                                label: Text('الإجراءات',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold))),
+                          ],
+                          rows: _flights.map((flight) {
+                            return DataRow(cells: [
+                              DataCell(Text(
+                                  flight.flightNumber.isEmpty
+                                      ? '-'
+                                      : flight.flightNumber,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.indigo))),
+                              DataCell(Text(flight.origin)),
+                              DataCell(Text(flight.destination)),
+                              DataCell(Text(DateFormat('dd/MM/yyyy')
+                                  .format(flight.date))),
+                              DataCell(Text(flight.departureTime.isEmpty
+                                  ? '-'
+                                  : flight.departureTime)),
+                              DataCell(Text(flight.arrivalTime.isEmpty
+                                  ? '-'
+                                  : flight.arrivalTime)),
+                              DataCell(
+                                  Text('\$${flight.price.toStringAsFixed(0)}')),
+                              DataCell(_seatsWidget(flight)),
+                              // مؤشر: هل الرحلة محلية فقط أم مرفوعة
+                              DataCell(Icon(
+                                _isOnline
+                                    ? Icons.cloud_done
+                                    : Icons.phone_android,
+                                color: _isOnline ? Colors.green : Colors.orange,
+                                size: 18,
+                              )),
+                              DataCell(Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.edit,
+                                        color: Colors.blue, size: 20),
+                                    onPressed: () =>
+                                        _showFlightDialog(context, flight),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete,
+                                        color: Colors.red, size: 20),
+                                    onPressed: () =>
+                                        _confirmDelete(context, flight.id),
+                                  ),
+                                ],
+                              )),
+                            ]);
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          );
-        },
+    );
+  }
+
+  Widget _seatsWidget(FlightModel flight) {
+    Color c = flight.availableSeats == 0
+        ? Colors.red
+        : flight.availableSeats <= 5
+            ? Colors.orange
+            : Colors.green;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: c),
+      ),
+      child: Text(
+        flight.availableSeats == 0
+            ? 'مكتملة'
+            : '${flight.availableSeats}/${flight.totalSeats}',
+        style: TextStyle(color: c, fontWeight: FontWeight.bold, fontSize: 12),
       ),
     );
   }
 
-  void _showFlightDialog(BuildContext context, AdminFirebaseService service,
-      [FlightModel? existing]) {
-    final flightNumCtrl = TextEditingController(text: existing?.flightNumber ?? '');
-    final originCtrl    = TextEditingController(text: existing?.origin ?? '');
-    final destCtrl      = TextEditingController(text: existing?.destination ?? '');
-    final priceCtrl     = TextEditingController(text: existing?.price.toString() ?? '');
-    final seatsCtrl     = TextEditingController(text: existing?.totalSeats.toString() ?? '');
-    final depTimeCtrl   = TextEditingController(text: existing?.departureTime ?? '');
-    final arrTimeCtrl   = TextEditingController(text: existing?.arrivalTime ?? '');
-    final boardTimeCtrl = TextEditingController(text: existing?.boardingTime ?? '');
-    final durationCtrl  = TextEditingController(text: existing?.duration ?? '');
-    DateTime selectedDate = existing?.date ?? DateTime.now().add(const Duration(days: 7));
+  void _showFlightDialog(BuildContext context, [FlightModel? existing]) {
+    final flightNumCtrl =
+        TextEditingController(text: existing?.flightNumber ?? '');
+    final originCtrl = TextEditingController(text: existing?.origin ?? '');
+    final destCtrl = TextEditingController(text: existing?.destination ?? '');
+    final priceCtrl =
+        TextEditingController(text: existing?.price.toString() ?? '');
+    final seatsCtrl =
+        TextEditingController(text: existing?.totalSeats.toString() ?? '');
+    final depTimeCtrl =
+        TextEditingController(text: existing?.departureTime ?? '');
+    final arrTimeCtrl =
+        TextEditingController(text: existing?.arrivalTime ?? '');
+    final boardTimeCtrl =
+        TextEditingController(text: existing?.boardingTime ?? '');
+    final durationCtrl = TextEditingController(text: existing?.duration ?? '');
+    DateTime selectedDate =
+        existing?.date ?? DateTime.now().add(const Duration(days: 7));
 
     showDialog(
       context: context,
@@ -211,156 +345,132 @@ class FlightsScreen extends StatelessWidget {
           content: SizedBox(
             width: 500,
             child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // ── الصف الأول: رقم الرحلة ──
-                  TextField(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextField(
                     controller: flightNumCtrl,
                     decoration: const InputDecoration(
-                      labelText: 'رقم الرحلة',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.confirmation_number),
-                      hintText: 'مثال: SV123',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(child: TextField(
-                      controller: originCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'مكان الانطلاق',
+                        labelText: 'رقم الرحلة',
                         border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.flight_takeoff),
-                      ),
-                    )),
-                    const SizedBox(width: 10),
-                    Expanded(child: TextField(
-                      controller: destCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'الوجهة',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.flight_land),
-                      ),
-                    )),
-                  ]),
-                  const SizedBox(height: 12),
-
-                  // ── أوقات الرحلة ──
-                  Row(children: [
-                    Expanded(child: TextField(
-                      controller: depTimeCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'وقت الإقلاع',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.access_time),
-                        hintText: '14:30',
-                      ),
-                    )),
-                    const SizedBox(width: 10),
-                    Expanded(child: TextField(
-                      controller: arrTimeCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'وقت الوصول',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.access_time_filled),
-                        hintText: '18:00',
-                      ),
-                    )),
-                  ]),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(child: TextField(
-                      controller: boardTimeCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'وقت الصعود',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.airline_seat_recline_normal),
-                        hintText: '13:45',
-                      ),
-                    )),
-                    const SizedBox(width: 10),
-                    Expanded(child: TextField(
-                      controller: durationCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'مدة الرحلة',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.timer),
-                        hintText: '3س 30د',
-                      ),
-                    )),
-                  ]),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(child: TextField(
-                      controller: priceCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'السعر (\$)',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.attach_money),
-                      ),
-                    )),
-                    const SizedBox(width: 10),
-                    Expanded(child: TextField(
-                      controller: seatsCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'عدد المقاعد الكلي',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.event_seat),
-                      ),
-                    )),
-                  ]),
-                  const SizedBox(height: 12),
-
-                  // ── اختيار التاريخ ──
-                  InkWell(
-                    onTap: () async {
-                      final picked = await showDatePicker(
+                        prefixIcon: Icon(Icons.confirmation_number),
+                        hintText: 'SV123')),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                      child: TextField(
+                          controller: originCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'مكان الانطلاق',
+                              border: OutlineInputBorder()))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: TextField(
+                          controller: destCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'الوجهة',
+                              border: OutlineInputBorder()))),
+                ]),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                      child: TextField(
+                          controller: depTimeCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'وقت الإقلاع',
+                              border: OutlineInputBorder(),
+                              hintText: '14:30'))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: TextField(
+                          controller: arrTimeCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'وقت الوصول',
+                              border: OutlineInputBorder(),
+                              hintText: '18:00'))),
+                ]),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                      child: TextField(
+                          controller: boardTimeCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'وقت الصعود',
+                              border: OutlineInputBorder(),
+                              hintText: '13:45'))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: TextField(
+                          controller: durationCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'مدة الرحلة',
+                              border: OutlineInputBorder(),
+                              hintText: '3س 30د'))),
+                ]),
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                      child: TextField(
+                          controller: priceCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                              labelText: 'السعر (\$)',
+                              border: OutlineInputBorder()))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: TextField(
+                          controller: seatsCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                              labelText: 'عدد المقاعد',
+                              border: OutlineInputBorder()))),
+                ]),
+                const SizedBox(height: 10),
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
                         context: ctx,
                         initialDate: selectedDate,
                         firstDate: DateTime.now(),
-                        lastDate: DateTime.now().add(const Duration(days: 365)),
-                      );
-                      if (picked != null) setDialogState(() => selectedDate = picked);
-                    },
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
+                        lastDate:
+                            DateTime.now().add(const Duration(days: 365)));
+                    if (picked != null) {
+                      setDialogState(() => selectedDate = picked);
+                    }
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.calendar_today, color: Colors.grey),
-                        const SizedBox(width: 8),
-                        Text('التاريخ: ${DateFormat('dd/MM/yyyy').format(selectedDate)}'),
-                      ]),
-                    ),
+                        borderRadius: BorderRadius.circular(4)),
+                    child: Row(children: [
+                      const Icon(Icons.calendar_today, color: Colors.grey),
+                      const SizedBox(width: 8),
+                      Text(
+                          'التاريخ: ${DateFormat('dd/MM/yyyy').format(selectedDate)}'),
+                    ]),
                   ),
-                ],
-              ),
+                ),
+              ]),
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء'),
-            ),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إلغاء')),
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white),
               onPressed: () async {
                 if (originCtrl.text.isEmpty || destCtrl.text.isEmpty) return;
                 final seats = int.tryParse(seatsCtrl.text) ?? 0;
-                // عند الإضافة الجديدة: availableSeats = totalSeats
-                // عند التعديل: نحافظ على الفرق (المحجوزة)
                 final bookedSeats = existing == null
                     ? 0
                     : (existing.totalSeats - existing.availableSeats);
-                final availableSeats = seats - bookedSeats;
-
+                final id = existing?.id ??
+                    DateTime.now().millisecondsSinceEpoch.toString();
                 final flight = FlightModel(
-                  id: existing?.id ?? '',
+                  id: id,
                   flightNumber: flightNumCtrl.text.trim(),
                   origin: originCtrl.text.trim(),
                   destination: destCtrl.text.trim(),
@@ -371,17 +481,18 @@ class FlightsScreen extends StatelessWidget {
                   duration: durationCtrl.text.trim(),
                   price: double.tryParse(priceCtrl.text) ?? 0,
                   totalSeats: seats,
-                  availableSeats: availableSeats.clamp(0, seats),
+                  availableSeats: (seats - bookedSeats).clamp(0, seats),
                 );
                 if (existing == null) {
-                  await service.addFlight(flight);
+                  await LocalDbService.addFlight(flight);
                 } else {
-                  await service.updateFlight(existing.id, flight.toFirestore());
+                  await LocalDbService.updateFlight(existing.id, flight);
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                }
+                _loadFlights();
               },
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.indigo, foregroundColor: Colors.white),
               child: Text(existing == null ? 'إضافة' : 'حفظ'),
             ),
           ],
@@ -390,20 +501,24 @@ class FlightsScreen extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, AdminFirebaseService service, String id) {
+  void _confirmDelete(BuildContext context, String id) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('تأكيد الحذف'),
-        content: const Text('هل أنت متأكد من حذف هذه الرحلة؟\nلا يمكن التراجع عن هذا الإجراء.'),
+        content: const Text('هل أنت متأكد من حذف هذه الرحلة؟'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
           ElevatedButton(
-            onPressed: () async {
-              await service.deleteFlight(id);
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              await LocalDbService.deleteFlight(id);
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+              }
+              _loadFlights();
+            },
             child: const Text('حذف', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -411,32 +526,43 @@ class FlightsScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _importFromExcel(BuildContext context, AdminFirebaseService service) async {
+  Future<void> _importFromExcel(BuildContext context) async {
     try {
       final flights = await ExcelService.importFlights();
-      if (flights.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('لم يتم تحديد ملف أو الملف فارغ')),
-          );
-        }
-        return;
-      }
-      await service.uploadFlightsBatch(flights);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تم رفع ${flights.length} رحلة بنجاح ✓'),
-            backgroundColor: Colors.green,
-          ),
+      if (flights.isEmpty) return;
+      for (final f in flights) {
+        final withId = FlightModel(
+          id: DateTime.now().millisecondsSinceEpoch.toString() +
+              flights.indexOf(f).toString(),
+          flightNumber: f.flightNumber,
+          origin: f.origin,
+          destination: f.destination,
+          date: f.date,
+          departureTime: f.departureTime,
+          arrivalTime: f.arrivalTime,
+          boardingTime: f.boardingTime,
+          duration: f.duration,
+          price: f.price,
+          totalSeats: f.totalSeats,
+          availableSeats: f.availableSeats,
         );
+        await LocalDbService.addFlight(withId);
+      }
+      _loadFlights();
+      if (context.mounted) {
+        _showSnack('تم حفظ ${flights.length} رحلة محلياً ✓', Colors.green);
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('خطأ في الاستيراد: $e'), backgroundColor: Colors.red),
-        );
+        _showSnack('خطأ: $e', Colors.red);
       }
     }
+  }
+
+  void _showSnack(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: color),
+    );
   }
 }

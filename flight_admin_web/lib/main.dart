@@ -5,6 +5,7 @@ import 'firebase_options.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'services/firebase_service.dart';
+import 'services/sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +15,7 @@ void main() async {
 
   // ✅ تسجيل دخول مجهول لضمان الوصول لـ Firestore
   await AdminFirebaseService.ensureAuthenticated();
+  SyncService().startMonitoring();
 
   runApp(const AdminApp());
 }
@@ -64,12 +66,9 @@ class _AdminAppState extends State<AdminApp> {
         useMaterial3: true,
       ),
       home: _isLoggedIn
-          ? DashboardScreen(
-              onLogout: () => setState(() => _isLoggedIn = false))
+          ? DashboardScreen(onLogout: () => setState(() => _isLoggedIn = false))
           : LoginScreen(
               onLoginSuccess: () => setState(() => _isLoggedIn = true)),
     );
   }
 }
-
-

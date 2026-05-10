@@ -27,7 +27,12 @@ class AdminFirebaseService {
   }
 
   Future<void> addFlight(FlightModel flight) async {
-    await _db.collection('flights').add(flight.toFirestore());
+    if (flight.id.isEmpty) {
+      await _db.collection('flights').add(flight.toFirestore());
+      return;
+    }
+
+    await _db.collection('flights').doc(flight.id).set(flight.toFirestore());
   }
 
   Future<void> updateFlight(String id, Map<String, dynamic> data) async {
@@ -181,5 +186,13 @@ class AdminFirebaseService {
     }
 
     throw Exception('تعذر تخصيص رقم مقعد لهذه الرحلة');
+  }
+
+  /// جلب الرحلات مرة واحدة (للمزامنة)
+  Future<List<FlightModel>> getFlightsOnce() async {
+    final snap = await _db.collection('flights').orderBy('date').get();
+    return snap.docs
+        .map((doc) => FlightModel.fromFirestore(doc.data(), doc.id))
+        .toList();
   }
 }
